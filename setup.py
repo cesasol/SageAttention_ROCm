@@ -75,7 +75,8 @@ if IS_ROCM:
     if rocm_arch:
         os.environ['ROCM_ARCH'] = rocm_arch
         debug = os.environ.get("SA_DEBUG", "0") == "1"
-        base_flags = ["-std=c++17", f"-D_GLIBCXX_USE_CXX11_ABI={ABI}", "-DUSE_ROCM=1"]
+        # Recent PyTorch headers require C++20.
+        base_flags = ["-std=c++20", f"-D_GLIBCXX_USE_CXX11_ABI={ABI}", "-DUSE_ROCM=1"]
         debug_flags = ["-O0", "-g3", "-ggdb", "-fno-inline", "-fno-omit-frame-pointer"] if debug else ["-O3"]
         # rocwmma 7.x has a static_cast<__half>(0.0f) in its HIP_vector_base macro that
         # fails when PyTorch sets __HIP_NO_HALF_CONVERSIONS__=1.
@@ -88,21 +89,27 @@ if IS_ROCM:
         torch_lib = os.path.join(torch.__path__[0], "lib")
         rocm_libs = [os.path.join(ROCM_HOME, d) for d in ["lib", "lib64"]]
         
-        # ROCm extension modules
-        ext_modules.extend([
-            CUDAExtension(
-                "sageattention._qattn_rocm",
-                sources=[
-                    "csrc/qattn/rocm/pybind_rocm.cpp",
-                    "csrc/qattn/rocm/launch_sgattn.cu",
-                    "csrc/qattn/rocm/sgattn.cu"
-                ],
-                include_dirs=[os.path.join(ROCM_HOME, "include"), os.path.join(ROCM_HOME, "include", "hip")],
-                extra_compile_args={"cxx": rocm_cxx, "nvcc": rocm_hipcc},
-                libraries=["amdhip64", "hiprtc", "rocblas", "hipblas", "c10", "torch", "torch_python"],
-                library_dirs=rocm_libs + [torch_lib],
-                runtime_library_dirs=rocm_libs + [torch_lib]
-            ),
+        # The INT8-QK / FP8-PV rocwmma kernel needs FP8 matrix cores (CDNA3/CDNA4, RDNA4).
+        # RDNA3 (gfx11xx) has no FP8 WMMA; sageattn() uses the Triton kernels there.
+        if rocm_arch in ("gfx942", "gfx950") or rocm_arch.startswith("gfx12"):
+            ext_modules.append(
+                CUDAExtension(
+                    "sageattention._qattn_rocm",
+                    sources=[
+                        "csrc/qattn/rocm/pybind_rocm.cpp",
+                        "csrc/qattn/rocm/launch_sgattn.cu",
+                        "csrc/qattn/rocm/sgattn.cu"
+                    ],
+                    include_dirs=[os.path.join(ROCM_HOME, "include"), os.path.join(ROCM_HOME, "include", "hip")],
+                    extra_compile_args={"cxx": rocm_cxx, "nvcc": rocm_hipcc},
+                    libraries=["amdhip64", "hiprtc", "rocblas", "hipblas", "c10", "torch", "torch_python"],
+                    library_dirs=rocm_libs + [torch_lib],
+                    runtime_library_dirs=rocm_libs + [torch_lib]
+                )
+            )
+        else:
+            print(f"Skipping sageattention._qattn_rocm: {rocm_arch} has no FP8 matrix cores.")
+        ext_modules.append(
             CUDAExtension(
                 "sageattention._fused",
                 # sources=["csrc/fused/rocm/pybind_rocm.cpp", "csrc/fused/rocm/fused.cu"],
@@ -113,7 +120,7 @@ if IS_ROCM:
                 library_dirs=rocm_libs + [torch_lib],
                 runtime_library_dirs=rocm_libs + [torch_lib]
             )
-        ])
+        )
         
         cmdclass = {"build_ext": BuildExtension} if ext_modules else {}
         print("Current ROCm architecture detected:", rocm_arch)
