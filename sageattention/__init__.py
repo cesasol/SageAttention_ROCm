@@ -14,6 +14,12 @@ def on_gfx950() -> bool:
     GPU_ARCH = torch.cuda.get_device_properties("cuda").gcnArchName
     return any(arch in GPU_ARCH for arch in ["gfx950"])
 
+
+def on_gfx12() -> bool:
+    """RDNA4: gfx12xx"""
+    GPU_ARCH = torch.cuda.get_device_properties("cuda").gcnArchName
+    return GPU_ARCH.startswith("gfx12")
+
 from .core import sageattn, sageattn_varlen
 from .core import sageattn_qk_int8_pv_fp16_triton
 from .core import sageattn_qk_int8_pv_fp16_cuda 

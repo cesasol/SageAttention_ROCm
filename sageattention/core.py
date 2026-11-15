@@ -55,7 +55,7 @@ import warnings
 import subprocess
 import re
 
-from . import is_hip, on_gfx942, on_gfx950
+from . import is_hip, on_gfx942, on_gfx950, on_gfx12
 
 def get_cuda_version():
     try:
@@ -176,7 +176,11 @@ def sageattn(
         # CDNA3 (gfx942, MI300X): use INT8/FP8 rocwmma kernel (FNUZ format, wave64).
         if on_gfx942():
             return sageattn_qk_int8_pv_fp8_cuda(q, k, v, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32")
-        # RDNA4 (gfx12xx) and RDNA3 (gfx11xx): use Triton Flash Attention for better throughput
+        # RDNA3 and older have no FP8 WMMA, so _qattn_rocm is not built: use INT8 QK / FP16 PV Triton.
+        # Checked before flash_attn_rdna4, whose failed compile is retried (not cached) on every call.
+        if not on_gfx12():
+            return sageattn_qk_int8_pv_fp16_triton(q, k, v, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse)
+        # RDNA4 (gfx12xx): use Triton Flash Attention for better throughput
         # The Triton kernel uses FP16 QK+PV and outperforms rocwmma INT8/FP8 by 3-4x on RDNA
         try:
             from .triton.flash_attn_rdna4 import flash_attn_triton

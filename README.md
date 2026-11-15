@@ -100,6 +100,22 @@ cd hopper
 python setup.py install
 ```
 
+### ROCm (AMD)
+
+Requires a ROCm build of PyTorch, the ROCm SDK headers (including `rocwmma`) under `/opt/rocm` (or `ROCM_HOME`), and `rocminfo` to detect the GPU arch. Build in the same environment as torch:
+```
+python setup.py build_ext --inplace   # or: pip install -e . --no-build-isolation
+```
+
+| Arch | `sageattn()` kernel | Compiled extensions |
+|---|---|---|
+| gfx942 (MI300) | INT8 QK / FP8 PV rocwmma | `_qattn_rocm`, `_fused` |
+| gfx950 (MI355) | CK flash-attn, else Triton / rocwmma | `_qattn_rocm`, `_fused` |
+| gfx12xx (RDNA4) | Triton flash-attn, else INT8 QK / FP8 PV rocwmma | `_qattn_rocm`, `_fused` |
+| gfx11xx (RDNA3) and older | INT8 QK / FP16 PV Triton (`sageattn_qk_int8_pv_fp16_triton`) | `_fused` only |
+
+RDNA3 has no FP8 WMMA, so the FP8 rocwmma kernel (`_qattn_rocm`) is not built there.
+
 ## How to Use
 ```python
 from sageattention import sageattn
