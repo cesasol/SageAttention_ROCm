@@ -112,9 +112,11 @@ python setup.py build_ext --inplace   # or: pip install -e . --no-build-isolatio
 | gfx942 (MI300) | INT8 QK / FP8 PV rocwmma | `_qattn_rocm`, `_fused` |
 | gfx950 (MI355) | CK flash-attn, else Triton / rocwmma | `_qattn_rocm`, `_fused` |
 | gfx12xx (RDNA4) | Triton flash-attn, else INT8 QK / FP8 PV rocwmma | `_qattn_rocm`, `_fused` |
-| gfx11xx (RDNA3) and older | INT8 QK / FP16 PV Triton (`sageattn_qk_int8_pv_fp16_triton`) | `_fused` only |
+| gfx11xx (RDNA3) and older | Triton flash-attn, else INT8 QK / FP16 PV Triton | `_fused` only |
 
-RDNA3 has no FP8 WMMA, so the FP8 rocwmma kernel (`_qattn_rocm`) is not built there.
+On RDNA, `sageattn()` uses the FP16/BF16 Triton flash-attention kernel (`sageattention/triton/flash_attn_rdna4.py`) for head dims 64 and 128 without `return_lse`, since it outperforms the quantized kernels there; other calls take the quantized fallback. RDNA3 has no FP8 WMMA, so the FP8 rocwmma kernel (`_qattn_rocm`) is not built there.
+
+Check the RDNA kernel against PyTorch SDPA (ragged lengths, GQA, causal, NHD/bf16) with `pytest tests/test_flash_attn_rdna.py`.
 
 ## How to Use
 ```python

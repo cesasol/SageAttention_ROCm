@@ -176,21 +176,15 @@ def sageattn(
         # CDNA3 (gfx942, MI300X): use INT8/FP8 rocwmma kernel (FNUZ format, wave64).
         if on_gfx942():
             return sageattn_qk_int8_pv_fp8_cuda(q, k, v, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32")
-        # RDNA3 and older have no FP8 WMMA, so _qattn_rocm is not built: use INT8 QK / FP16 PV Triton.
-        # Checked before flash_attn_rdna4, whose failed compile is retried (not cached) on every call.
-        if not on_gfx12():
-            return sageattn_qk_int8_pv_fp16_triton(q, k, v, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse)
-        # RDNA4 (gfx12xx): use Triton Flash Attention for better throughput
-        # The Triton kernel uses FP16 QK+PV and outperforms rocwmma INT8/FP8 by 3-4x on RDNA
-        try:
+        # RDNA (gfx11xx/gfx12xx): Triton Flash Attention (FP16/BF16 QK+PV) outperforms
+        # the quantized kernels on RDNA. It covers every shape except return_lse and odd head dims.
+        if not return_lse and q.dtype in (torch.float16, torch.bfloat16) and q.size(-1) in (64, 128):
             from .triton.flash_attn_rdna4 import flash_attn_triton
-            if tensor_layout == "HND" and not return_lse and q.dtype == torch.float16:
-                if sm_scale is None:
-                    sm_scale = q.size(-1) ** -0.5
-                return flash_attn_triton(q, k, v, sm_scale=sm_scale, is_causal=is_causal)
-        except Exception:
-            pass  # fall through to rocwmma path
-        return sageattn_qk_int8_pv_fp8_cuda(q, k, v, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32")
+            return flash_attn_triton(q, k, v, tensor_layout=tensor_layout, sm_scale=sm_scale, is_causal=is_causal)
+        if on_gfx12():
+            return sageattn_qk_int8_pv_fp8_cuda(q, k, v, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32")
+        # RDNA3 and older have no FP8 WMMA, so _qattn_rocm is not built: use INT8 QK / FP16 PV Triton.
+        return sageattn_qk_int8_pv_fp16_triton(q, k, v, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse)
     elif arch == "sm80":
         return sageattn_qk_int8_pv_fp16_cuda(q, k, v, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32")
     elif arch == "sm86":
